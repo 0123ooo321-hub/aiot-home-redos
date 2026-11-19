@@ -1,0 +1,12 @@
+const test=require('node:test'),assert=require('node:assert/strict');
+const M=require('../web/model.js');
+const cfg={autoVent:true,autoHeat:true,threshold:1000,target:23};
+test('Прогноз 800→900 за 10 мин: 1050 ppm через 15 мин',()=>{const h=Array.from({length:11},(_,t)=>({t,co2:800+t*10}));const f=M.forecast(h,10);assert.equal(f.valid,true);assert.equal(f.value,1050);});
+test('Пропуски, старые данные и смена режима отключают прогноз',()=>{assert.equal(M.forecast([],10).valid,false);assert.equal(M.forecast([{t:1,co2:800}],10).valid,false);const s=M.initial();assert.equal(M.forecast(s.history,s.t,s.t).valid,false);});
+test('Нет NaN при одинаковом времени и нечисловых данных',()=>{assert.equal(M.forecast(Array(5).fill({t:10,co2:900}),10).valid,false);assert.equal(M.forecast([{t:10,co2:NaN}],10).valid,false);});
+test('При потере связи и открытом окне обогрев заблокирован',()=>{const s=M.initial();s.temp=18;s.online=false;assert.equal(M.devices(s,cfg).heater,false);s.online=true;s.window=true;assert.equal(M.devices(s,cfg).heater,false);assert.equal(M.devices(s,cfg).fan,false);});
+test('Вентиляция после двух минут превышения',()=>{const s=M.initial();s.highMinutes=1;assert.equal(M.devices(s,cfg).fan,false);s.highMinutes=2;assert.equal(M.devices(s,cfg).fan,true);});
+test('Эко после 30 минут без людей',()=>{const s=M.initial();s.lastMotion=s.t-30;assert.equal(M.devices(s,cfg).eco,true);assert.equal(M.devices(s,cfg).heater,false);});
+test('Экономика 1 и 5 помещений совпадает с конкурсной работой',()=>{const p={rooms:1,annual:5200,saving:10,tariff:6,nodeCost:5200,hubCost:6000,hubWatts:8};let e=M.economy(p);assert.equal(e.capital,11200);assert.ok(Math.abs(e.net-2699.52)<1e-8);assert.ok(Math.abs(e.payback-4.1488857)<1e-5);e=M.economy({...p,rooms:5});assert.equal(e.capital,32000);assert.ok(Math.abs(e.net-15179.52)<1e-8);});
+test('Отрицательный эффект не даёт фиктивной окупаемости',()=>{assert.equal(M.economy({rooms:1,annual:0,saving:0,tariff:6,nodeCost:5200,hubCost:6000,hubWatts:8}).payback,null);assert.throws(()=>M.economy({rooms:0,annual:0,saving:0,tariff:6,nodeCost:5200,hubCost:6000,hubWatts:8}));});
+test('Модель работает 180 минут, история ограничена, числа конечны',()=>{let s=M.initial();for(let i=0;i<180;i++)s=M.step(s,cfg);assert.equal(s.t,195);assert.equal(s.history.length,180);assert.ok(Number.isFinite(s.co2)&&s.co2>=420);assert.ok(s.energy>0);});
